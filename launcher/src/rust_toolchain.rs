@@ -1673,8 +1673,9 @@ mod tests {
                 "--locked",
                 "--profile",
                 "fast",
+                // The game's `horizon-client` bin is in the horizon-game package.
                 "-p",
-                "horizon-client",
+                "horizon-game",
                 "--bin",
                 "horizon-client",
             ])

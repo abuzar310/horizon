@@ -320,6 +320,23 @@ fn stale_worker_cannot_commit_after_successful_migration() {
     f.migrated(&roots);
 }
 
+/// #18138: a child process another thread spawns while a migration holds its lock has a copy of
+/// the lock's descriptor until its exec. The lock is released when the migration ends all the
+/// same: closing the file alone left it taken through the copy, and the next migration read
+/// "Cannot lock".
+#[cfg(unix)]
+#[test]
+fn migration_lock_is_released_while_a_copy_of_its_descriptor_is_open() {
+    let f = Fixture::new("build");
+    let lease = MigrationLease::take(&f.bootstrap).unwrap();
+    let copy = lease.0.try_clone().unwrap();
+    assert!(f.refuse(&f.target()).contains("Cannot lock"));
+    drop(lease);
+    let roots = migrate(&f.source, &f.target(), &f.bootstrap, |_| {}).unwrap();
+    f.migrated(&roots);
+    drop(copy);
+}
+
 #[test]
 fn shared_lock_blocks_migration_until_all_readers_release() {
     let f = Fixture::new("build");
@@ -329,6 +346,7 @@ fn shared_lock_blocks_migration_until_all_readers_release() {
     drop(first);
     assert!(f.refuse(&f.target()).contains("Cannot lock"));
     assert!(!f.target().exists());
+    second.unlock().unwrap(); // A parallel fork may still hold its pre-exec descriptor copy.
     drop(second);
     f.old_pointer();
     let roots = migrate(&f.source, &f.target(), &f.bootstrap, |_| {}).unwrap();

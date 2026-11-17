@@ -320,6 +320,20 @@ fn stale_worker_cannot_commit_after_successful_migration() {
     f.migrated(&roots);
 }
 
+// Proof branch only: the new test of #18138 against the old plain-File lock. Expected to fail.
+#[cfg(unix)]
+#[test]
+fn migration_lock_is_released_while_a_copy_of_its_descriptor_is_open() {
+    let f = Fixture::new("build");
+    let lease = lock_at(&f.bootstrap, true).unwrap();
+    let copy = lease.try_clone().unwrap();
+    assert!(f.refuse(&f.target()).contains("Cannot lock"));
+    drop(lease);
+    let roots = migrate(&f.source, &f.target(), &f.bootstrap, |_| {}).unwrap();
+    f.migrated(&roots);
+    drop(copy);
+}
+
 #[test]
 fn shared_lock_blocks_migration_until_all_readers_release() {
     let f = Fixture::new("build");

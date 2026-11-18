@@ -343,10 +343,12 @@ fn shared_lock_blocks_migration_until_all_readers_release() {
     let first = acquire_lock_at(&f.bootstrap).unwrap();
     let second = acquire_lock_at(&f.bootstrap).unwrap();
     assert!(f.refuse(&f.target()).contains("Cannot lock"));
+    // A parallel fork may still hold a pre-exec copy of either descriptor: unlock, not only close.
+    first.unlock().unwrap();
     drop(first);
     assert!(f.refuse(&f.target()).contains("Cannot lock"));
     assert!(!f.target().exists());
-    second.unlock().unwrap(); // A parallel fork may still hold its pre-exec descriptor copy.
+    second.unlock().unwrap();
     drop(second);
     f.old_pointer();
     let roots = migrate(&f.source, &f.target(), &f.bootstrap, |_| {}).unwrap();

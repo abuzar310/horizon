@@ -5,8 +5,9 @@
 //!
 //! Content is data, not code: nothing here executes. What a mod
 //! may add is fenced instead. Its own namespaces (its id and the ones its
-//! manifest lists), plus additions to vanilla tags and to the convention
-//! tags (`c`, which NeoForge and Fabric mods share). Paths are plain, files
+//! manifest lists), plus additions to vanilla tags, to the convention
+//! tags (`c`, which NeoForge and Fabric mods share) and to the villagers'
+//! work-block tags (`horizon:villager_secondary_poi/<job>`). Paths are plain, files
 //! and totals are capped, vanilla ids cannot be redefined, and no two mods
 //! share a namespace ([`clash`]).
 use crate::manifest::Manifest;
@@ -22,6 +23,15 @@ use std::{
 pub const MAX_FILES: usize = 65_536;
 pub const MAX_FILE: u64 = 16 << 20;
 pub const MAX_TOTAL: u64 = 512 << 20;
+
+/// Why the game would refuse a content file for what it is, not where it lies
+/// ([`check_path`]): an executable, by its extension or its first bytes (a `#!`
+/// script, an ELF, Mach-O, PE or wasm binary). A tool that writes content,
+/// such as a port of a Java mod, leaves such a file out; the game refuses the
+/// whole mod for one.
+pub fn check_bytes(name: &str, bytes: &[u8]) -> Result<(), String> {
+    crate::manifest::check_file(name, 0o100_644, || Ok(bytes)).map_err(|e| e.to_string())
+}
 
 /// Checks a content path: `assets/` or `data/`, then `/`-separated parts of
 /// `[a-z0-9_.-]`, none of them `.` or `..` (vanilla's resource-location
@@ -64,10 +74,24 @@ pub(crate) fn check_namespace(name: &str, manifest: &Manifest) -> Result<(), Str
     // tags and atlases, and to the convention tags mods share.
     let shared = matches!(namespace, "minecraft" | "c");
     let atlas = top == "assets" && namespace == "minecraft" && rest.starts_with("atlases/");
-    let allowed = owned || (top == "data" && shared && rest.starts_with("tags/")) || atlas;
+    // The blocks each job's villagers also work at, which the villager brain reads: one
+    // `<job>.json` per job, nothing deeper; the rest of the `horizon` namespace stays the game's.
+    let villager_poi = top == "data"
+        && namespace == "horizon"
+        && rest
+            .strip_prefix("tags/block/villager_secondary_poi/")
+            .and_then(|file| file.strip_suffix(".json"))
+            .is_some_and(|job| {
+                !job.is_empty()
+                    && job
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+            });
+    let allowed =
+        owned || (top == "data" && shared && rest.starts_with("tags/")) || atlas || villager_poi;
     if !allowed {
         return Err(format!(
-            "{name}: a mod adds files in its own namespaces ({top}/{id}/ and those listed in namespaces), to vanilla and convention (c) tags, or to vanilla's atlases"
+            "{name}: a mod adds files in its own namespaces ({top}/{id}/ and those listed in namespaces), to vanilla and convention (c) tags, to the villagers' work-block tags (data/horizon/tags/block/villager_secondary_poi/<job>.json, <job> of [a-z0-9_]), or to vanilla's atlases"
         ));
     }
 
@@ -224,30 +248,9 @@ pub struct StateValues<T> {
     pub default: Option<T>,
 }
 
-/// Block-local boxes selected by an ordered tuple of state properties.
-#[derive(Clone, Debug, PartialEq)]
+/// Block-local boxes selected by one state property or an ordered tuple.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct BlockShapes(pub StateValues<Vec<[f64; 6]>>);
-
-impl<'de> Deserialize<'de> for BlockShapes {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Shapes {
-            #[serde(default)]
-            properties: Vec<String>,
-            #[serde(default)]
-            values: BTreeMap<String, Vec<[f64; 6]>>,
-            default: Option<Vec<[f64; 6]>>,
-        }
-        let shapes = Shapes::deserialize(deserializer)?;
-        Ok(Self(StateValues {
-            property: String::new(),
-            properties: shapes.properties,
-            values: shapes.values,
-            default: shapes.default,
-        }))
-    }
-}
 
 impl std::ops::Deref for BlockShapes {
     type Target = StateValues<Vec<[f64; 6]>>;
@@ -1933,10 +1936,8 @@ capabilities = ["registries"]
             block.collision_shapes.as_ref().unwrap().default,
             Some(vec![])
         );
-        assert!(
-            serde_json::from_str::<BlockShapes>(r#"{"property":"axis","default":[]}"#).is_err()
-        );
         for value in [
+            r#"{"property":"axis","properties":["axis"],"default":[]}"#,
             r#"{"properties":["axis","axis"],"default":[]}"#,
             r#"{"properties":["Axis"],"default":[]}"#,
             r#"{"properties":["axis","count"],"values":{"x":[]}}"#,
@@ -1968,6 +1969,26 @@ capabilities = ["registries"]
         let mut nonfinite = oversized;
         nonfinite.default = Some(vec![[f64::NAN; 6]]);
         assert!(nonfinite.check().is_err());
+    }
+
+    #[test]
+    fn content_package_accepts_legacy_single_property_shapes() {
+        let content = hmod(
+            "legacy-shapes",
+            MANIFEST_TEXT,
+            &[(
+                "data/ruby/horizon/block/pipe.json",
+                br#"{"template":"minecraft:iron_chain","shapes":{"property":"axis","values":{"x":[[0,0.375,0.375,1,0.625,0.625]]}},"collision_shapes":{"property":"axis","values":{"x":[]}}}"#,
+            )],
+        )
+        .unwrap();
+        let block = &content.blocks[0];
+        let shapes = block.shapes.as_ref().unwrap();
+        assert_eq!(shapes.property_names(), ["axis"]);
+        assert_eq!(shapes.values["x"], [[0.0, 0.375, 0.375, 1.0, 0.625, 0.625]]);
+        let collision = block.collision_shapes.as_ref().unwrap();
+        assert_eq!(collision.property_names(), ["axis"]);
+        assert!(collision.values["x"].is_empty());
     }
 
     fn hmod(name: &str, manifest: &str, files: &[(&str, &[u8])]) -> Result<Content, String> {
@@ -3350,6 +3371,43 @@ capabilities = ["registries"]
         );
         let e = tab(r#"{"title": "Gems", "icon": "ruby", "items": []}"#).unwrap_err();
         assert!(e.contains("item ids"), "{e}");
+    }
+
+    #[test]
+    fn adds_villager_work_blocks_but_nothing_else_of_horizon() {
+        let farmer = br#"{"values": ["ruby:ruby_block"]}"#;
+        let files: &[(&str, &[u8])] = &[
+            ("data/ruby/horizon/block/ruby_block.json", BLOCK),
+            (
+                "data/horizon/tags/block/villager_secondary_poi/farmer.json",
+                farmer,
+            ),
+        ];
+        let content = hmod("villager-poi", MANIFEST_TEXT, files).unwrap();
+        assert_eq!(content.files.len(), 2);
+        for name in [
+            "data/horizon/tags/block/other.json",
+            "data/horizon/tags/item/villager_secondary_poi/farmer.json",
+            "data/horizon/recipe/stone.json",
+            "assets/horizon/tags/block/villager_secondary_poi/farmer.json",
+            "data/horizon/tags/block/villager_secondary_poi/nested/farmer.json",
+            "data/horizon/tags/block/villager_secondary_poi/farmer.txt",
+            "data/horizon/tags/block/villager_secondary_poi/farmer.json.",
+            "data/horizon/tags/block/villager_secondary_poi/.json",
+            "data/horizon/tags/block/villager_secondary_poi/far.mer.json",
+        ] {
+            let e = hmod("horizon-ns", MANIFEST_TEXT, &[(name, farmer)]).unwrap_err();
+            assert!(e.contains("own namespaces"), "{name}: {e}");
+        }
+        // A mod can't take the game's namespace as its id to step past the fence.
+        let as_horizon = MANIFEST_TEXT.replacen("id = \"ruby\"", "id = \"horizon\"", 1);
+        let e = hmod(
+            "horizon-id",
+            &as_horizon,
+            &[("data/horizon/recipe/stone.json", b"{}")],
+        )
+        .unwrap_err();
+        assert!(e.contains("no mod may claim"), "{e}");
     }
 
     #[test]

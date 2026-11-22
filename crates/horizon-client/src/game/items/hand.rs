@@ -620,6 +620,10 @@ impl Game<'_> {
             || before(self.interaction_hit().map(|h| h.1))
             || before(self.dragon_hit().map(|h| h.1))
             || before(
+                self.primed_tnt_hit(self.block_reach.max(self.entity_reach))
+                    .map(|(_, d)| d),
+            )
+            || before(
                 self.mob_hit_within(self.block_reach.max(self.entity_reach))
                     .map(|h| h.1),
             )
@@ -733,19 +737,27 @@ impl Game<'_> {
         if visible.0 == held.0 && visible.1.as_ref() == Some(stack) {
             return;
         }
-        if !mod_api::__private::item_listens(
+        let hand = if h == 0 { Hand::Main } else { Hand::Off };
+        let slot = if h == 0 { "mainhand" } else { "offhand" };
+        let slot_changed = h == 0 && visible.0 != held.0;
+        let mut reequip = !*same;
+        if mod_api::__private::item_listens(
             mod_api::HookId::ShouldCauseReequipAnimation,
             &stack.item,
         ) {
-            return;
+            self.native_should_cause_reequip_animation(
+                stack,
+                visible.1.as_ref(),
+                hand,
+                slot_changed,
+                &mut reequip,
+            );
         }
-        let hand = if h == 0 { Hand::Main } else { Hand::Off };
-        let slot_changed = h == 0 && visible.0 != held.0;
-        let mut reequip = !*same;
-        self.native_should_cause_reequip_animation(
+        self.native_should_cause_reequip_animation_in_slot(
             stack,
             visible.1.as_ref(),
             hand,
+            slot,
             slot_changed,
             &mut reequip,
         );
@@ -779,6 +791,7 @@ impl Game<'_> {
             self.boat_hit().map(|h| h.1),
             self.cart_hit().map(|h| h.1),
             self.dragon_hit().map(|h| h.1),
+            self.primed_tnt_hit(self.entity_reach).map(|(_, d)| d),
         ]);
         let active = self
             .using
@@ -836,6 +849,10 @@ impl Game<'_> {
             self.painting_hit().map(|h| h.1),
             self.frame_hit().map(|h| h.1),
             self.dragon_hit().map(|h| h.1),
+            // A nearer TNT outside the entity reach becomes a miss after
+            // `LocalPlayer.pick` filters it, hiding a block menu behind it too.
+            self.primed_tnt_hit(self.block_reach.max(self.entity_reach))
+                .map(|(_, d)| d),
         ];
         let nearest = cart
             .into_iter()

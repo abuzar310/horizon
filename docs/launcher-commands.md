@@ -359,9 +359,7 @@ MCP: `data_show`.
 
 ## `horizon-launcher data delete`
 
-Delete everything sent from here, and what waits, and take a new install ID. When the server can't be
-reached, or sending is turned off (`HORIZON_TELEMETRY_URL=off`) so it can't be asked, what waits is still
-deleted, the ID is kept, and the command fails, so the deletion can be asked again.
+Delete everything sent from here, and what waits, and take a new install ID.
 
     horizon-launcher data delete
 

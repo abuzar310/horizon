@@ -117,6 +117,9 @@ def region_chunks(path):
             payload = gzip.decompress(payload)
         elif codec == 2:
             payload = zlib.decompress(payload)
+        elif codec != 3:
+            raise ValueError('%s: chunk (%d, %d) has unsupported compression type %d' % (
+                path, i & 31, i >> 5, codec))
         out[(i & 31, i >> 5)] = read_named(payload)
     return out
 

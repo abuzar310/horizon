@@ -98,13 +98,17 @@ class ChunkReadCodecMatrix(unittest.TestCase):
 
         with self.subTest(codec="unsupported"):
             body, _ = chunk(2, 1, "ignored")
-            folder, _ = self.write("unsupported", {(2, 1): (4, body)})
+            folder, path = self.write("unsupported", {(2, 1): (4, body)})
             with self.assertRaises(ValueError) as raised:
                 world_compare.read_chunks(str(folder))
             message = str(raised.exception)
             self.assertIn("r.0.0.mca", message)
             self.assertIn("2, 1", message)
             self.assertIn("compression type 4", message)
+            # The independent Anvil reader refuses it too, rather than reading the bytes as NBT.
+            with self.assertRaises(ValueError) as raised:
+                anvil_dump.region_chunks(path)
+            self.assertIn("compression type 4", str(raised.exception))
 
         with self.subTest(codec="unsupported beside a supported chunk"):
             gzip_body, _ = chunk(2, 1, "valid")
@@ -138,6 +142,18 @@ class ChunkReadCodecMatrix(unittest.TestCase):
             with self.assertRaises(OSError) as raised:
                 anvil_dump.region_chunks(path)
             self.assertIn("c.33.64.mcc", str(raised.exception))
+
+        # An external chunk in a compression neither reader decodes is refused, not read as NBT.
+        folder, path = self.write("external-lz4", {(1, 0): (0x84, b"")}, "r.1.2.mca")
+        (folder / "c.33.64.mcc").write_bytes(external_body)
+        with self.subTest(reader="world_compare", codec="unsupported"):
+            with self.assertRaises(ValueError) as raised:
+                world_compare.read_chunks(str(folder))
+            self.assertIn("compression type 4", str(raised.exception))
+        with self.subTest(reader="anvil_dump", codec="unsupported"):
+            with self.assertRaises(ValueError) as raised:
+                anvil_dump.region_chunks(path)
+            self.assertIn("compression type 4", str(raised.exception))
 
 
 if __name__ == "__main__":

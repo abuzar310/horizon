@@ -124,7 +124,11 @@ fn parse(source: &str) -> Vec<Block> {
                 item = Some((depth, number));
             }
             Event::End(TagEnd::Item) => flush(&mut blocks, &mut text, &mut spans, &mut item, None),
-            Event::Start(Tag::CodeBlock(_)) => code = Some(String::new()),
+            Event::Start(Tag::CodeBlock(_)) => {
+                // A tight list's item has no paragraph to end its text before the block.
+                flush(&mut blocks, &mut text, &mut spans, &mut item, None);
+                code = Some(String::new())
+            }
             Event::End(TagEnd::CodeBlock) => {
                 blocks.push(Block::Code(code.take().unwrap_or_default()))
             }

@@ -368,10 +368,10 @@ pub fn modlist(list: &Value) -> Result<Pack, String> {
             let (loader, v) = version.split_once('-').unwrap_or(("", &version));
             pack.loader = loader.to_owned();
             pack.loader_version = v.to_owned();
-            if loader == "neoforge" {
-                if let Some(minecraft) = neoforge_minecraft(v) {
-                    pack.minecraft = minecraft;
-                }
+            if loader == "neoforge"
+                && let Some(minecraft) = neoforge_minecraft(v)
+            {
+                pack.minecraft = minecraft;
             }
             continue;
         }

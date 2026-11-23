@@ -308,3 +308,44 @@ fn block(block: &Block, t: &Theme) -> AnyElement {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each block as a line: its kind, and its text with what a test needs.
+    fn shown(blocks: &[Block]) -> Vec<String> {
+        blocks
+            .iter()
+            .map(|block| match block {
+                Block::Heading(level, text, _) => format!("heading {level} {text}"),
+                Block::Paragraph(text, _) => format!("paragraph {text}"),
+                Block::Item(depth, number, text, _) => format!("item {depth} {number:?} {text}"),
+                Block::Code(code) => format!("code {}", code.trim()),
+                Block::Rule => "rule".to_string(),
+                Block::Table(rows) => format!("table {}", rows.len()),
+            })
+            .collect()
+    }
+
+    /// The items of a tight list have no paragraphs, so an item's text is still waiting when a
+    /// code block in that item starts: it goes before the block, and text after the block stays
+    /// apart from it.
+    #[test]
+    fn a_code_block_in_a_list_item_follows_the_items_text() {
+        let steps = "1. Add the repository:\n   ```\n   maven\n   ```\n2. Then build.\n";
+        assert_eq!(
+            shown(&parse(steps)),
+            [
+                "item 0 Some(1) Add the repository:",
+                "code maven",
+                "item 0 Some(2) Then build.",
+            ]
+        );
+        let around = "- before\n  ```\n  code\n  ```\n  after\n";
+        assert_eq!(
+            shown(&parse(around)),
+            ["item 0 None before", "code code", "paragraph after"]
+        );
+    }
+}

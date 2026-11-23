@@ -116,6 +116,29 @@ class ChunkReadCodecMatrix(unittest.TestCase):
             with self.assertRaises(ValueError):
                 world_compare.read_chunks(str(folder))
 
+    def test_an_external_chunk_is_read_from_its_mcc_file(self):
+        """A chunk of 256 sectors or more is a stub in the region (length 1, compression | 0x80) and its
+        compressed stream in c.X.Z.mcc beside it, named by absolute chunk coordinates."""
+        inline_body, inline = chunk(32, 64, "inline")
+        external_body, external = chunk(33, 64, "external")
+        folder, path = self.write("external", {(0, 0): (2, inline_body), (1, 0): (0x82, b"")}, "r.1.2.mca")
+        mcc = folder / "c.33.64.mcc"
+        mcc.write_bytes(zlib.compress(external_body))
+        with self.subTest(reader="world_compare"):
+            self.assertEqual(world_compare.read_chunks(str(folder)), {(32, 64): inline, (33, 64): external})
+        with self.subTest(reader="anvil_dump"):
+            self.assertEqual(anvil_dump.region_chunks(path), {(0, 0): inline, (1, 0): external})
+
+        mcc.unlink()
+        with self.subTest(reader="world_compare", mcc="missing"):
+            with self.assertRaises(OSError) as raised:
+                world_compare.read_chunks(str(folder))
+            self.assertIn("c.33.64.mcc", str(raised.exception))
+        with self.subTest(reader="anvil_dump", mcc="missing"):
+            with self.assertRaises(OSError) as raised:
+                anvil_dump.region_chunks(path)
+            self.assertIn("c.33.64.mcc", str(raised.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

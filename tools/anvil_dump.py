@@ -18,6 +18,7 @@ Used to compare Horizon saves with worlds written by the vanilla server.
 import gzip
 import io
 import json
+import os
 import struct
 import sys
 import zlib
@@ -101,8 +102,17 @@ def region_chunks(path):
             continue
         start = off * 4096
         length = struct.unpack('>i', data[start:start + 4])[0]
-        codec = data[start + 4] & 0x7F
-        payload = data[start + 5:start + 4 + length]
+        codec = data[start + 4]
+        if codec & 0x80:
+            # A chunk too large for the region: a stub here, its stream in c.X.Z.mcc beside the
+            # region, named by absolute chunk coordinates.
+            _, rx, rz, _ = os.path.basename(path).split('.')
+            mcc = 'c.%d.%d.mcc' % (int(rx) * 32 + (i & 31), int(rz) * 32 + (i >> 5))
+            with open(os.path.join(os.path.dirname(path), mcc), 'rb') as stream:
+                payload = stream.read()
+        else:
+            payload = data[start + 5:start + 4 + length]
+        codec &= 0x7F
         if codec == 1:
             payload = gzip.decompress(payload)
         elif codec == 2:
